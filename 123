@@ -52,6 +52,7 @@ foreach ($ComputerName in $uncheckedComputers) {
 
 # Сохраняем результаты
 $adminEntries Export-Csv -Path "$CheckedComputersPath" -NoTypeInformation -Force
+
 $currentUncheckedComputers ForEach-Object { [pscustomobject]@{ComputerName=$_} } Export-Csv -Path "$UncheckedComputersPath" -NoTypeInformation -Force
 
 Write-Host "Результаты проверенных компьютеров сохранены в $CheckedComputersPath"
