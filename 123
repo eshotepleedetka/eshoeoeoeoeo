@@ -1,0 +1,58 @@
+Import-Module ActiveDirectory
+
+# Путь к файлам для сохранения состояний машин
+$CheckedComputersPath = "C:\temp\checked_computers.csv"
+$UncheckedComputersPath = "C:\temp\unchecked_computers.csv"
+
+# Создание каталога, если он не существует
+if (-not (Test-Path -Path "C:\temp")) {
+    New-Item -ItemType Directory -Path "C:\temp"
+}
+
+# Загрузка списка ранее проверенных и непроверенных машин
+$checkedComputers = if (Test-Path $CheckedComputersPath) { Import-Csv $CheckedComputersPath Select-Object -ExpandProperty ComputerName } else { @() }
+$uncheckedComputers = if (Test-Path $UncheckedComputersPath) { Import-Csv $UncheckedComputersPath Select-Object -ExpandProperty ComputerName } else { (Get-ADComputer -Filter *).Name }
+
+$adminEntries = @()
+$currentUncheckedComputers = @()
+
+foreach ($ComputerName in $uncheckedComputers) {
+    if (-not $checkedComputers -contains $ComputerName) {
+        if (Test-Connection -ComputerName $ComputerName -Count 2 -Quiet) {
+            # Подключаемся к компьютеру и ищем локальных администраторов по SID
+            $localAdminGroupSID = 'S-1-5-32-544'
+            $admins = Invoke-Command -ComputerName $ComputerName -ScriptBlock {
+                try {
+                    $localAdmins = (New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')).Translate([System.Security.Principal.NTAccount]).Value
+                    return $localAdmins
+                } catch {
+                    return $null
+                }
+            }
+
+            # Если удалось получить список, добавляем записи, иначе выводим предупреждение
+            if ($admins) {
+                foreach ($admin in $admins) {
+                    $adminEntries += [pscustomobject]@{
+                        ComputerName  = $ComputerName
+                        Administrator = $admin
+                    }
+                }
+            } else {
+                Write-Warning "Не удалось получить список администраторов для компьютера $ComputerName."
+            }
+        } else {
+            Write-Host "Компьютер $ComputerName недоступен."
+            $currentUncheckedComputers += $ComputerName
+        }
+        # Добавляем компьютер в список проверенных
+        $checkedComputers += $ComputerName
+    }
+}
+
+# Сохраняем результаты
+$adminEntries Export-Csv -Path "$CheckedComputersPath" -NoTypeInformation -Force
+$currentUncheckedComputers ForEach-Object { [pscustomobject]@{ComputerName=$_} } Export-Csv -Path "$UncheckedComputersPath" -NoTypeInformation -Force
+
+Write-Host "Результаты проверенных компьютеров сохранены в $CheckedComputersPath"
+Write-Host "Список недоступных компьютеров сохранен в $UncheckedComputersPath"
